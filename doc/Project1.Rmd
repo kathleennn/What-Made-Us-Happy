@@ -1,0 +1,382 @@
+---
+title: 'What Made Us Happy?'
+output:
+  html_document: default
+  pdf_document: default
+---
+When we were in school, we were happy because we got good grades. Then we went into the workforce, we were happy because of getting promoted. After that, we went into middle ages, we were happy because of children. Imagine, now, our children had grown up, what will make happy? For people in different life stages, some sources of their happiness are changing but some are not. Let's look at what will change and what will not via this data analysis. 
+
+```{r pressure, echo=FALSE, out.width = '70%'}
+knitr::include_graphics("happiness.png")
+```
+
+At the begining of the study, I will use topic modeling to divide happy moments in life into three categories. Secondly, I will investigate what moments in lives will make people happy when they are in different life stages. Finally, I will show my findings about the wording behavior of different people. 
+```{r,warning= FALSE, message = FALSE, echo=FALSE}
+library(tidyverse)
+library(tidytext)
+library(DT)
+library(scales)
+library(wordcloud2)
+library(gridExtra)
+library(ngram)
+library(shiny) 
+```
+
+
+
+```{r load data, warning=FALSE, message=FALSE,echo=FALSE}
+hm_data <- read_csv("../output/processed_moments.csv")
+
+urlfile<-'https://raw.githubusercontent.com/rit-public/HappyDB/master/happydb/data/demographic.csv'
+demo_data <- read_csv(urlfile)
+```
+
+```{r combining data, warning=FALSE, message=FALSE,echo=FALSE}
+hm_data <- hm_data %>%
+  inner_join(demo_data, by = "wid") %>%
+  select(wid,
+         original_hm,
+         gender, 
+         marital, 
+         parenthood,
+         reflection_period,
+         age, 
+         country, 
+         ground_truth_category, 
+         predicted_category,
+         text) %>%
+  mutate(count = sapply(hm_data$text, wordcount)) %>%
+  filter(gender %in% c("m", "f")) %>%
+  filter(marital %in% c("single", "married")) %>%
+  filter(parenthood %in% c("n", "y")) %>%
+  filter(reflection_period %in% c("24h", "3m")) %>%
+  mutate(reflection_period = fct_recode(reflection_period, 
+                                        months_3 = "3m", hours_24 = "24h"))
+```
+
+
+```{r bag of words, warning=FALSE, message=FALSE,echo=FALSE}
+bag_of_words <-  hm_data %>%
+  unnest_tokens(word, text)
+
+word_count <- bag_of_words %>%
+  count(word, sort = TRUE) 
+
+word_count <- word_count[which(word_count$word!='feel'),]
+word_count <- word_count[which(word_count$word!='enjoyed'),]
+word_count <- word_count[which(word_count$word!='time'),]
+word_count <- word_count[which(word_count$word!='day'),]
+word_count <- word_count[which(word_count$word!='moment'),]
+word_count <- word_count[which(word_count$word!='found'),]
+word_count <- word_count[which(word_count$word!='favorite'),]
+word_count <- word_count[which(word_count$word!='finally'),]
+
+word_counts <- bag_of_words %>%
+  count(predicted_category,word, sort = TRUE) %>%
+  ungroup()
+
+word_counts <- word_counts[which(word_counts$word!='feel'),]
+word_counts <- word_counts[which(word_counts$word!='enjoyed'),]
+word_counts <- word_counts[which(word_counts$word!='time'),]
+word_counts <- word_counts[which(word_counts$word!='day'),]
+word_counts <- word_counts[which(word_counts$word!='moment'),]
+word_counts <- word_counts[which(word_counts$word!='found'),]
+word_counts <- word_counts[which(word_counts$word!='favorite'),]
+word_counts <- word_counts[which(word_counts$word!='finally'),]
+```
+
+
+There are some words in the survey that can not tell us what really makes people happy. For example, all the words to describe happiness which includes "fun", "enjoyed","favorite", etc. Also, some verbs like "feel" and "found", etc. I exclude those words from the word_count list. 
+
+##Topic Modeling 
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+chapters_dtm <- word_counts %>%
+  cast_dtm(predicted_category, word, n)
+```
+
+```{r,echo=FALSE}
+library(topicmodels)
+chapters_lda <- LDA(chapters_dtm, k = 3, control = list(seed = 1234))
+```
+
+```{r,echo=FALSE}
+chapter_topics <- tidy(chapters_lda, matrix = "beta")
+```
+
+
+```{r,echo=FALSE}
+top_terms <- chapter_topics %>%
+  group_by(topic) %>%
+  top_n(10, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+```
+
+
+```{r,echo=FALSE}
+library(ggplot2)
+
+top_terms %>%
+  mutate(term = reorder(term, beta)) %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip()
+```
+
+I divided those texts into three topics and the above graphs showed top 10 most relevant words for each topic. The topic 1 is essentially about Entertainment. People are happy because of doing some activities like playing game, eating delicious food or watching a movie. The topic 2 is about Family, people are happy because of their family members like their wife, husband, childrens and dogs. The topic 3 is about Achievements. People are happy because they did something they feel proud of like landing a job, buying a car etc. 
+
+
+##Overview of the frequent words
+
+
+```{r,echo=FALSE}
+word_count %>%
+      slice(1:200) %>%
+      wordcloud2(size = 0.6,
+                 rotateRatio = 0,backgroundColor = "grey")
+```
+The top frequent words are relating to "friend", "family", "home", "birthday", "job", "dinner", "husband", "daughter",etc. These words showed the core source of happiniess for these people and it reflects what they value the most in their lives. Most of their happiness are relating to friends, Thus, friends play an indispensible role throughout people's lives no matter what ages they are in, no matter what gender they are, and no matter if they are single or married.   \newline
+
+
+We can also have a numberical visulization of the Top frequent words and their frequncies by looking at the bar chart below. 
+```{r,echo=FALSE}
+word_count %>%
+      slice(1:20) %>%
+      mutate(word = reorder(word, n)) %>%
+      ggplot(aes(word, n)) +
+      
+      geom_col(width=.5,fill="tomato3") +
+      ggtitle("Top Frequent Words")+
+      xlab(NULL) +
+      ylab("Word Frequency")+
+      scale_fill_brewer()+
+      coord_flip()
+```
+
+
+The most frequent word "friend" has a frequency way much higher the 2nd most frequent word "friend". Human beings are social animals, most of them can not live without friends. 
+
+
+Then, I want to know as people are getting old, how will their source of happiness change. I will look at top frequent words for people in different ages. 
+
+
+```{r, warning=FALSE, message=FALSE,echo=FALSE}
+hm_bigrams <- hm_data %>%
+  filter(count != 1) %>%
+  unnest_tokens(bigram, text, token = "ngrams", n = 2)
+
+bigram_counts <- hm_bigrams %>%
+  separate(bigram, c("word1", "word2"), sep = " ") %>%
+  count(word1, word2, sort = TRUE)
+```
+
+```{r,echo=FALSE,fig.height=10}
+hm_data_age_20 <- hm_data[which(hm_data$age > 10 & hm_data$age < 21),]
+bag_of_words_age_20 <-  hm_data_age_20 %>%
+  unnest_tokens(word, text)
+word_count_age_20 <- bag_of_words_age_20 %>%
+  count(word, sort = TRUE)
+
+hm_data_age_30 <- hm_data[which(hm_data$age < 31 & hm_data$age > 20),]
+bag_of_words_age_30 <-  hm_data_age_30 %>%
+  unnest_tokens(word, text)
+word_count_age_30 <- bag_of_words_age_30 %>%
+  count(word, sort = TRUE)
+
+hm_data_age_40 <- hm_data[which(hm_data$age > 30 & hm_data$age <41 ),]
+bag_of_words_age_40 <-  hm_data_age_40 %>%
+  unnest_tokens(word, text)
+word_count_age_40 <- bag_of_words_age_40 %>%
+  count(word, sort = TRUE)
+
+hm_data_age_50 <- hm_data[which(hm_data$age > 40 & hm_data$age < 51 ),]
+bag_of_words_age_50 <-  hm_data_age_50 %>%
+  unnest_tokens(word, text)
+word_count_age_50 <- bag_of_words_age_50 %>%
+  count(word, sort = TRUE)
+
+hm_data_age_60 <- hm_data[which(hm_data$age > 50 & hm_data$age < 61 ),]
+bag_of_words_age_60 <-  hm_data_age_60 %>%
+  unnest_tokens(word, text)
+word_count_age_60 <- bag_of_words_age_60 %>%
+  count(word, sort = TRUE)
+
+hm_data_age_70 <- hm_data[which(hm_data$age > 60 ),]
+bag_of_words_age_70 <-  hm_data_age_70 %>%
+  unnest_tokens(word, text)
+word_count_age_70 <- bag_of_words_age_70 %>%
+  count(word, sort = TRUE)
+
+word_count_age_20$word <- factor(word_count_age_20$word, levels = word_count_age_20$word[order(word_count_age_20$n)])
+word_count_age_30$word <- factor(word_count_age_30$word, levels = word_count_age_30$word[order(word_count_age_30$n)])
+word_count_age_40$word <- factor(word_count_age_40$word, levels = word_count_age_40$word[order(word_count_age_40$n)])
+word_count_age_50$word <- factor(word_count_age_50$word, levels = word_count_age_50$word[order(word_count_age_50$n)])
+word_count_age_60$word <- factor(word_count_age_60$word, levels = word_count_age_60$word[order(word_count_age_60$n)])
+word_count_age_70$word <- factor(word_count_age_70$word, levels = word_count_age_70$word[order(word_count_age_70$n)])
+
+p1 <-word_count_age_20 %>%
+      slice(1:20) %>%
+      mutate(word = reorder(word, n)) %>%
+      ggplot(aes(word, n)) +
+      geom_col() +
+      ggtitle("Age From 10-20")+
+      xlab(NULL) +
+      ylab("Word Frequency")+
+      coord_flip()
+
+p2 <- word_count_age_30 %>%
+      slice(1:20) %>%
+      mutate(word = reorder(word, n)) %>%
+      ggplot(aes(word, n)) +
+      geom_col() +
+      ggtitle("Age From 21-30")+
+      xlab(NULL) +
+      ylab("Word Frequency")+
+      coord_flip()
+p3 <- word_count_age_40 %>%
+      slice(1:20) %>%
+      mutate(word = reorder(word, n)) %>%
+      ggplot(aes(word, n)) +
+      geom_col() +
+      ggtitle("Age From 31-40")+
+      xlab(NULL) +
+      ylab("Word Frequency")+
+      coord_flip()
+p4 <- word_count_age_50 %>%
+      slice(1:20) %>%
+      mutate(word = reorder(word, n)) %>%
+      ggplot(aes(word, n)) +
+      geom_col() +
+      ggtitle("Age From 41-50")+
+      xlab(NULL) +
+      ylab("Word Frequency")+
+      coord_flip()
+p5 <- word_count_age_60 %>%
+      slice(1:20) %>%
+      mutate(word = reorder(word, n)) %>%
+      ggplot(aes(word, n)) +
+      geom_col() +
+      ggtitle("Age From 51-60")+
+      xlab(NULL) +
+      ylab("Word Frequency")+
+      coord_flip()
+p6 <- word_count_age_70 %>%
+      slice(1:20) %>%
+      mutate(word = reorder(word, n)) %>%
+      ggplot(aes(word, n)) +
+      geom_col() +
+      ggtitle("Age Over 60")+
+      xlab(NULL) +
+      ylab("Word Frequency")+
+      coord_flip()
+
+
+grid.arrange(p1, p2,p3,p4,p5,p6, nrow = 3, top = "Top 20 Words for People in Different Age Groups")
+```
+\newline
+
+
+Other than the top frequent words for all people, teenagers talked about "game","event", "girlfriend", "finished", "college", "exam" frenquently. \newline
+
+
+For people in 20s, they talk more about "family", "home", "job", "night". \newline
+
+
+For people in 30s, "friend", "family" are still top frequent words. Other than that, "son", "daughter", "wife", "husband" become top frequent words. \newline
+
+
+For people in 40s, their top frequent words are similar to those in 30s. \newline
+
+
+For people who are older than 50, their top frequent words are still relating to family and friends, which are "friend", "daughter", "husband", "son", "home", "wife".And there are some new words appeared in the list, which are "visit", "dog", "love". \newline
+
+
+As we can see from these top frequent words list, some words are relating to each other. For example, "exam" will be associated with "school" in our common sense. Next, I want to know which words are correlated. 
+
+
+
+### Create bigrams using the text data
+
+```{r,echo = FALSE}
+hm_bigrams <- hm_data %>%
+  filter(count != 1) %>%
+  unnest_tokens(bigram, text, token = "ngrams", n = 2)
+
+bigram_counts <- hm_bigrams %>%
+  separate(bigram, c("word1", "word2"), sep = " ") %>%
+  count(word1, word2, sort = TRUE)
+```
+
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+library(widyr)
+a <- hm_bigrams
+a<- a$bigram
+a <- unlist(strsplit(a," "))
+dat <- data_frame(group = rep(1:(979610/2), each = 2),
+                  letter = a)
+title_word_pairs<-pairwise_count(dat, letter, group)
+
+desc_word_pairs <-pairwise_count(dat, letter,group, sort = TRUE, upper = FALSE)
+
+```
+
+
+
+```{r,echo=FALSE,message=FALSE, warning=FALSE}
+library(ggplot2)
+library(igraph)
+library(ggraph)
+set.seed(1234)
+desc_word_pairs %>%
+  filter(n >= 150) %>%
+  graph_from_data_frame() %>%
+  ggraph(layout = "fr") +
+  geom_edge_link(aes(edge_alpha = n, edge_width = n), edge_colour = "darkred") +
+  geom_node_point(size = 5) +
+  ggtitle("Correlation for Bigrams")+
+  geom_node_text(aes(label = name), repel = TRUE,
+                 point.padding = unit(0.2, "lines")) +
+  theme_void()
+```
+
+
+
+As we can see from this correlation map, "friend" is correlated with many words. That means people did many things with their friends. Also, "video"" is correlated with "game" and "played", they means people always use these three words together. And "offer", "job", "interview" are correlated with each other as well. We can observe that there are many pairs of correlated word like these in this graph.
+
+
+
+##Sentence Length
+
+
+Lastly, I want to know the wording behavior for people in different age groups.
+```{r,echo=FALSE}
+hm_data$sentence_length <- sapply(strsplit(hm_data$original_hm, " "), length)
+```
+
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE,tidy = TRUE, tidy.opts = list(comment = FALSE) }
+p <- ggplot(hm_data, aes(x=age,color=gender, y=sentence_length)) +
+  geom_point(binaxis = "y", stackdir = "center",size=.15) +
+  ggtitle("Sentence Length Overview")+
+  scale_x_discrete(breaks=c("10","20","30","40","50","60","70"),
+        labels=c("10", "20", "30","40","50","60","70"))
+  
+  theme(axis.text.x = element_text(color="#993333",size=8, angle=45))
+grid.arrange(p,nrow = 1)
+```
+
+
+This graph shows different wording behavior for people in different age groups. It implies that people who are younger than 40 years old tend to write more words in this survey. And there are some extremely long texts writen by people in 20-30 age group.
+
+
+
+
+###Summary
+After analyzing the HappyDB data, I conclude that some sources of happiness are not changing throughout people's entire life, which includes "friend" and "family". People are happy because of their loved ones. 
+
+
+#References:
+- Silge, Julia, and David Robinson. Text Mining with R, 18 Aug. 2018, www.tidytextmining.com/topicmodeling.html.
+
